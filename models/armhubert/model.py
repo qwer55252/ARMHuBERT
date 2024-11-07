@@ -447,6 +447,9 @@ class CustomStudentModel(BaseFairseqModel):
             features = self.apply_mask(features, padding_mask, mask_indices)
 
         x, layer_results, tr_layer_results = self.encoder(features, padding_mask=padding_mask, layer=layer)
+        
+        # TODO
+        # layer_results <- MHA output 같으니, 결과 출력해보기
 
         if self.layerwise_proj:
             if self.proj_head:
