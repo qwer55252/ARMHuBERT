@@ -1,0 +1,1 @@
+python train.py -c /home/kobie/workspace/ARMHuBERT/conf/armhubert/my-armhubert-960.yaml
