@@ -40,9 +40,9 @@ class W2V2Distil(LightningModule):
         teacher_model = self.yaml_cfg['teacher']['teacher_model']
         teacher_cfg = self.yaml_cfg['teacher']
         if 'wavlm' in teacher_model:
-            self.teacher_model, teacher_config, self.task_agnostic = load_wavlm_and_config(teacher_model, arg_overrides=teacher_cfg)
+            self.teacher_model, teacher_cfg, self.task_agnostic = load_wavlm_and_config(teacher_model, arg_overrides=teacher_cfg)
         else:
-            self.teacher_model, teacher_config, self.task_agnostic = load_model_and_config(teacher_model, arg_overrides=teacher_cfg)
+            self.teacher_model, teacher_cfg, self.task_agnostic = load_model_and_config(teacher_model, arg_overrides=teacher_cfg)
         freeze_model(self.teacher_model)
 
         if self.train_cfg['mask_prob_schedule']:
