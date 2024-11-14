@@ -8,3 +8,7 @@ wandb/
 lightning_logs/
 run_s3prl.sh
 ft
+
+tools/activate*
+tools/venv
+tools/Miniconda*
