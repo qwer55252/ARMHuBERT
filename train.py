@@ -69,12 +69,16 @@ class W2V2Distil(LightningModule):
 
         # copy the mask tokens from the teacher
         # self.student_model.mask_emb.data = self.teacher_model.model.mask_emb.data
-        if self.distiller_cfg['freeze_student_mask']:
-            self.student_model.mask_emb.requires_grad = False
+        # if self.distiller_cfg['freeze_student_mask']:
+        #     self.student_model.mask_emb.requires_grad = False
 
         self.rec_loss_weight = self.train_cfg['rec_loss_weight']
         self.rec_loss_type = self.train_cfg['rec_loss_type']
         self.random_layer_weight = self.train_cfg['random_layer_weight']
+
+        # Attention distillation related configurations
+        self.attn_loss_weight = self.train_cfg['attn_loss_weight']
+        self.attn_loss_type = self.train_cfg['attn_loss_type']
 
         if self.train_cfg['delete_projections']:
             self.student_model._disable_projection_heads()
@@ -178,31 +182,37 @@ class W2V2Distil(LightningModule):
         #     "layer_results": [x, (attn, lr)] x #layers,
         #     "features": [features]
         # }
+        # layer_results: [x, (attn, lr)] * layers
+        # -> attn: bsz, heads, time, time
 
         student_results = self.student_model(
             source=x, 
             padding_mask=padding_mask,
-            mask_indices=None,
         )
         # -> RETURNS: {
-        #     "x": x,
-        #     "padding_mask": padding_mask,
-        #     "features": features after post projector,
+        #     "x": x, 
+        #     "post_cnn": features_to_distill, 
+        #     "pre_trf": tr_layer_results,
         #     "layer_results": layer_results,
-        #     "tr_layer_results": tr_layer_results,
-        #     "projections": projections
+        #     "attn_layer_results": attn_layer_results,
+        #     "padding_mask": padding_mask,
+        #     "projections": projections,
         # }
+        # attn_layer_results: layers, bsz, head, time, time
 
         return student_results, teacher_results
 
     def training_step(self, batch, batch_idx):
-        student_results, unm_teacher_results, m_teacher_results = self(**batch)
+        # student_results, unm_teacher_results, m_teacher_results = self(**batch)
         
-        loss, losses = self.calculate_loss(student_results, unm_teacher_results, m_teacher_results)
+        # loss, losses = self.calculate_loss(student_results, unm_teacher_results, m_teacher_results)
 
-        if self.train_cfg['monitor_losses']:
-            for k, v in losses.items():
-                self.log(k, v.item(), prog_bar=True)
+        student_results, teacher_results = self.forward_without_mask(**batch)
+        loss = self.calculate_loss_without_mask(student_results, teacher_results)
+
+        # if self.train_cfg['monitor_losses']:
+        #     for k, v in losses.items():
+        #         self.log(k, v.item(), prog_bar=True)
             # mask_diff = F.mse_loss(self.teacher_model.model.mask_emb, self.student_model.mask_emb.detach(), reduction='mean')
             # self.log('mask_diff', mask_diff, prog_bar=True)
 
@@ -354,8 +364,31 @@ class W2V2Distil(LightningModule):
                 rec_loss = rec_loss.mean()
         else:
             rec_loss = 0
+
+        # Feature loss
+        if self.attn_loss_weight > 0:
+            if self.attn_loss_type == "avg":
+                # TODO: implement avg attn distillation
+                print('skip')
+            elif self.attn_loss_type == "1to1":
+                teacher_attns = []
+                for x, tup in teacher_results['layer_results']:
+                    teacher_attns.append(tup[0])    # tup: (attn, lr)
+                teacher_attns = torch.stack(teacher_attns, dim=0)   # [layer, batch, head, time, time]
+                student_attns = student_results['attn_layer_results']   # [layer, batch, head, time, time]
+                
+                attn_loss = 0
+                for layer in range(len(student_attns)):
+                    teacher_attn = teacher_attns[layer]  # [batch, head, time, time]
+                    student_attn = student_attns[layer]  # [batch, head, time, time]
+
+                    # Compute MSE loss for this layer and accumulate
+                    layer_loss = F.mse_loss(student_attn, teacher_attn)
+                    attn_loss += layer_loss
+        else:
+            attn_loss = 0
         
-        return rec_loss
+        return self.rec_loss_weight * rec_loss + self.attn_loss_weight * attn_loss
 
     def configure_optimizers(self):
         # optimizer = torch.optim.AdamW(self.parameters(), lr=eval(self.yaml_cfg['optimizer']['lr']))
@@ -405,7 +438,7 @@ if __name__ == '__main__':
     parser.add_argument('-c', '-cfg', '--config', 
                         help='yaml config path for training')
 
-    parser.add_argument('-m', '--model', default='armhubert',
+    parser.add_argument('-m', '--model', default='hwdhubert',
                         help='define model name')
 
     parser.add_argument('-t', '--test',
@@ -413,7 +446,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    YAML_PATH = args.config or './conf/armhubert/armhubert-960.yaml'
+    YAML_PATH = args.config or './conf/hwdhubert/hwdhubert-s-100.yaml'
     with open(YAML_PATH) as f:
         YAML_CFG = yaml.load(f, Loader = yaml.FullLoader)
 
@@ -429,7 +462,7 @@ if __name__ == '__main__':
     accumulate_grad_batches = YAML_CFG['train']['accumulate_grad_batches']
 
     model = W2V2Distil(cfg = YAML_CFG)
-    wandb_logger = WandbLogger(project = 'ARMHuBERT',
+    wandb_logger = WandbLogger(project = 'HWDHuBERT',
                                name = model.time_tag,
                                resume = False,
                                sync_tensorboard = True)

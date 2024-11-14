@@ -339,7 +339,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
             dropout=attention_dropout,
             self_attention=True,
         )
-        self.self_attn._set_skip_embed_dim_check()
+        # self.self_attn._set_skip_embed_dim_check()
 
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(self.activation_dropout)
@@ -378,7 +378,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
                 value=x,
                 key_padding_mask=self_attn_padding_mask,
                 attn_mask=self_attn_mask,
-                need_weights=need_weights,
+                need_weights=True,
             )
 
             x = self.dropout1(x)
@@ -395,13 +395,12 @@ class TransformerSentenceEncoderLayer(nn.Module):
             x = self.dropout3(x)
             x = residual + x
         else:
-
             x, attn = self.self_attn(
                 query=x,
                 key=x,
                 value=x,
                 key_padding_mask=self_attn_padding_mask,
-                need_weights=need_weights,
+                need_weights=True,
             )
 
             x = self.dropout1(x)
@@ -421,3 +420,44 @@ class TransformerSentenceEncoderLayer(nn.Module):
             x = self.final_layer_norm(x)
 
         return x, (attn, layer_result)
+
+class LayerWiseProjHead(nn.Module):
+    """Projection Head for (naive) layer-wise distillation"""
+
+    def __init__(self, in_dim, out_dim, enable_tr_layer, tr_reduce_factor):
+        super().__init__()
+
+        self.in_dim = in_dim  # Din
+        self.out_dim = out_dim  # Dout
+        self.enable_tr_layer = enable_tr_layer
+        self.tr_reduce_factor = tr_reduce_factor
+
+        self.upsampler = None
+        if self.enable_tr_layer:
+            self.upsampler = nn.ConvTranspose1d(
+                in_channels=self.in_dim,
+                out_channels=self.in_dim,
+                kernel_size=self.tr_reduce_factor,
+                stride=self.tr_reduce_factor,
+            )
+        
+        self.lin_proj = None
+        if self.in_dim != self.out_dim:
+            self.lin_proj = nn.Linear(
+                in_features=self.in_dim,
+                out_features=self.out_dim,
+            )
+
+    def forward(self, x:torch.Tensor):
+        # x: (B x T/f x D_in)
+
+        if self.upsampler:
+            x = x.transpose(1,2)
+            x = self.upsampler(x)
+            x = x.transpose(1,2)
+
+        if self.lin_proj:
+            x = self.lin_proj(x)
+
+        # x: (B x T x D_out)
+        return x

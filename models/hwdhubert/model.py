@@ -11,6 +11,7 @@ from .module import (
     ConvFeatureExtractionModel,
     TransformerEncoder,
     TransformerSentenceEncoderLayer,
+    LayerWiseProjHead,
 )
 
 @dataclass
@@ -139,6 +140,28 @@ class CustomStudentModelConfig(FairseqDataclass):
         metadata={"help": "# of layer to initialize encoder layer of teacher model."
                           "For non-positive integer, recognize as False"}
     )
+
+    # Prediction Head
+    pred_head_inter_dim: int = field(
+        default=0,
+        metadata={"help": "Intermediate dimension of prediction head"}
+    )
+
+    pred_head_final_dim: int = field(
+        default=768,
+        metadata={"help": "Final output dimension of prediction head"
+                          "Same as transformer hidden dimension of teacherm model"}
+    )
+
+    pred_layer_id: str = field(
+        default="[3, 7, 11]",
+        metadata={"help": "Layer index to predict by prediction heads"}
+    )
+
+    layerwise_proj: bool = field(
+        default=False,
+        metadata={"help": "Whether to use (naive) layer-wise projection for distillation"}
+    )
         
     layer_grad_scale: bool = field(
         default=False, metadata={"help": "apply layer gradient scaling"}
@@ -209,6 +232,26 @@ class CustomStudentModel(BaseFairseqModel):
         self.final_proj = None
         self.specaug = None
 
+        self.layerwise_proj = cfg.layerwise_proj
+        if cfg.layerwise_proj:
+            # (Naive) Layer-wise projection
+            # TODO: Try split version vs single version
+            self.proj_head = nn.ModuleList([
+                LayerWiseProjHead(
+                    in_dim=cfg.encoder_embed_dim,
+                    out_dim=cfg.pred_head_final_dim,
+                    enable_tr_layer=False,
+                    tr_reduce_factor=False,
+                ) for _ in range(cfg.encoder_layers)
+            ])
+        else:
+            # DistilHuBERT style projection
+            self.proj_head = nn.Sequential(
+                nn.Linear(cfg.encoder_embed_dim, pred_head_inter_dim * self.n_tasks),
+                nn.GELU(),
+                SplitLinear(pred_head_inter_dim, self.n_tasks, pred_head_final_dim),
+            ) if self.n_tasks > 0 else None
+
     def add_specaug(self, specaug):
         self.specaug = specaug
 
@@ -235,6 +278,13 @@ class CustomStudentModel(BaseFairseqModel):
 
         return input_lengths.to(torch.long)
 
+    def _disable_projection_heads(self):
+        if self.layerwise_proj:
+            self.final_proj = self.proj_head[-1]
+            self.proj_head = None
+        else:
+            self.proj_head = None
+        # self.cnn_proj_head = None
 
     def forward(
         self,
@@ -294,8 +344,16 @@ class CustomStudentModel(BaseFairseqModel):
 
         x, layer_results, attn_layer_results, tr_layer_results = self.encoder(features, padding_mask=padding_mask, layer=layer)
 
-        if self.final_proj is not None:
-            x = self.final_proj(x)
+        if self.layerwise_proj:
+            if self.proj_head:
+                projections = [
+                    head(layer_results[i].transpose(0, 1)) 
+                    for i, head in enumerate(self.proj_head)
+                ]
+                x = projections[-1]
+            else:
+                x = self.final_proj(x)
+                projections = None
 
         tr_layer_results = tr_layer_results.transpose(0, 1)
         x = x.transpose(0, 1)
@@ -306,8 +364,9 @@ class CustomStudentModel(BaseFairseqModel):
             "post_cnn": features_to_distill, 
             "pre_trf": tr_layer_results,
             "layer_results": layer_results,
-            "attn_layer_results": attn_layer_results,
+            "attn_layer_results": torch.stack(attn_layer_results, dim=0),
             "padding_mask": padding_mask,
+            "projections": projections,
         }
 
     def extract_features(self, source, padding_mask, layer=None):

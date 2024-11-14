@@ -1,5 +1,5 @@
-pytorch-lightning
-
+pytorch-lightning==1.7.7
+torchmetrics==0.11.4
 numpy<=1.23.5
 fairseq
 s3prl
@@ -11,3 +11,4 @@ torchsummaryX
 torchinfo
 tensorboard
 tensorboardX
+soundfile
