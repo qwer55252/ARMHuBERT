@@ -13,14 +13,14 @@ train:
   checkpoint: 
   num_epochs: 200
   gpus: 1
-  batch_size: 3
-  accumulate_grad_batches: 16
+  batch_size: 4
+  accumulate_grad_batches: 12
   use_fp16: True
   use_apex: False 
   monitor_losses: True
   rec_loss_weight: 1.0
   rec_loss_type: mse
-  attn_loss_weight: 1.0
+  attn_loss_weight: 0.0
   attn_loss_type: 1to1
   distil_random_layer: 11
   random_layer_weight: 0.1

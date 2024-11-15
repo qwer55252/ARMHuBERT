@@ -198,7 +198,7 @@ class W2V2Distil(LightningModule):
         #     "padding_mask": padding_mask,
         #     "projections": projections,
         # }
-        # attn_layer_results: layers, bsz, head, time, time
+        # attn_layer_results: (bsz, head, time, time) * layers
 
         return student_results, teacher_results
 
@@ -371,20 +371,28 @@ class W2V2Distil(LightningModule):
                 # TODO: implement avg attn distillation
                 print('skip')
             elif self.attn_loss_type == "1to1":
-                teacher_attns = []
+                teacher_attns = []  # [batch, head, time, time] * layer
                 for x, tup in teacher_results['layer_results']:
                     teacher_attns.append(tup[0])    # tup: (attn, lr)
-                teacher_attns = torch.stack(teacher_attns, dim=0)   # [layer, batch, head, time, time]
-                student_attns = student_results['attn_layer_results']   # [layer, batch, head, time, time]
+                student_attns = student_results['attn_layer_results']   # [batch, head, time, time] * layer
                 
                 attn_loss = 0
-                for layer in range(len(student_attns)):
-                    teacher_attn = teacher_attns[layer]  # [batch, head, time, time]
-                    student_attn = student_attns[layer]  # [batch, head, time, time]
+                if self.train_cfg['distil_random_layer'] > 0:
+                    for layer in self.rand_l:
+                        teacher_attn = teacher_attns[layer]  # [batch, head, time, time]
+                        student_attn = student_attns[layer]  # [batch, head, time, time]
 
-                    # Compute MSE loss for this layer and accumulate
-                    layer_loss = F.mse_loss(student_attn, teacher_attn)
-                    attn_loss += layer_loss
+                        # Compute MSE loss for this layer and accumulate
+                        layer_loss = F.mse_loss(student_attn, teacher_attn)
+                        attn_loss += layer_loss
+                else:
+                    for layer in range(len(student_attns)):
+                        teacher_attn = teacher_attns[layer]  # [batch, head, time, time]
+                        student_attn = student_attns[layer]  # [batch, head, time, time]
+
+                        # Compute MSE loss for this layer and accumulate
+                        layer_loss = F.mse_loss(student_attn, teacher_attn)
+                        attn_loss += layer_loss
         else:
             attn_loss = 0
         

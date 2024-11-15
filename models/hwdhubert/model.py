@@ -364,7 +364,7 @@ class CustomStudentModel(BaseFairseqModel):
             "post_cnn": features_to_distill, 
             "pre_trf": tr_layer_results,
             "layer_results": layer_results,
-            "attn_layer_results": torch.stack(attn_layer_results, dim=0),
+            "attn_layer_results": attn_layer_results,
             "padding_mask": padding_mask,
             "projections": projections,
         }
