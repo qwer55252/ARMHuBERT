@@ -1,4 +1,4 @@
-OUTPUT_DIR="models/hwdhubert"  # change
+OUTPUT_DIR="hwdhubert"  # change
 venv_dir=$PWD/tools/venv
 python_ver="3.10"
 
