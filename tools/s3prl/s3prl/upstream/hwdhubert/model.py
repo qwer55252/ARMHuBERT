@@ -360,7 +360,7 @@ class CustomStudentModel(BaseFairseqModel):
 
         # Output as T B D
         return {
-            "x": x, 
+            "x": x.transpose(0, 1),     # Output as B T D
             "post_cnn": features_to_distill, 
             "pre_trf": tr_layer_results,
             "layer_results": layer_results,
