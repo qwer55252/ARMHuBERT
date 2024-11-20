@@ -11,4 +11,4 @@ cp -r ./models/$OUTPUT_DIR tools/s3prl/s3prl/upstream/$OUTPUT_DIR
 
 rm -rf $venv_dir/lib/python${python_ver}/site-packages/s3prl/upstream $venv_dir/lib/python${python_ver}/site-packages/s3prl/hub.py
 cp -r tools/s3prl/s3prl/upstream $venv_dir/lib/python${python_ver}/site-packages/s3prl/
-cp -r tools/s3prl/s3prl/hub.py $venv_dir/lib/python${python_ver}/site-packages/hub.py
+cp -r tools/s3prl/s3prl/hub.py $venv_dir/lib/python${python_ver}/site-packages/s3prl/hub.py
