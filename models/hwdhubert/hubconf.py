@@ -1,8 +1,8 @@
 from .expert import UpstreamExpert as _UpstreamExpert
 
-def starhubert(ckpt, model_config, **kwargs):
+def hwdhubert(ckpt, model_config, **kwargs):
     """
-    FSPHuBERT model
+    HWDHuBERT model
 
     Args:
         ckpt: 
