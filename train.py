@@ -365,11 +365,51 @@ class W2V2Distil(LightningModule):
         else:
             rec_loss = 0
 
-        # Feature loss
+        # Attention loss
         if self.attn_loss_weight > 0:
             if self.attn_loss_type == "avg":
-                # TODO: implement avg attn distillation
-                print('skip')
+                
+                teacher_attns = []  # [batch, head, time, time] * layer
+                for x, tup in teacher_results['layer_results']:
+                    # print(f'tup: {tup}')
+                    teacher_attns.append(tup[0])    # tup: (attn, lr)
+                
+                student_attns = student_results['attn_layer_results']   # [batch, head, time, time] * layer
+                
+                
+                # teacher_attns: (bsz, head, time, time)
+                # student_attns: (bsz, head/2, time, time)
+                # 라고 가정하고 코드 짬
+                attn_loss = 0
+                
+                if self.train_cfg['distil_random_layer'] > 0:
+                    
+                    for layer in self.rand_l:
+                        teacher_attn = teacher_attns[layer]  # [batch, head, time, time]
+                        student_attn = student_attns[layer]  # [batch, head/2, time, time]
+                        batch_size, num_heads, seq_len, _ = teacher_attn.shape
+                        
+                        teacher_attn = teacher_attn.view(batch_size, num_heads // 2, 2, seq_len, seq_len) # [batch, head/2, 2, time, time]
+                        teacher_attn = teacher_attn.mean(dim=2)  # [batch, head/2, time, time]
+
+                        # Compute MSE loss for this layer and accumulate
+                        layer_loss = F.mse_loss(student_attn, teacher_attn)
+                        attn_loss += layer_loss
+                else:
+                    for layer in range(len(student_attns)):
+                        teacher_attn = teacher_attns[layer]  # [batch, head, time, time]
+                        student_attn = student_attns[layer]  # [batch, head/2, time, time]
+                        batch_size, num_heads, seq_len, _ = teacher_attn.shape
+                        
+                        teacher_attn = teacher_attn.view(batch_size, num_heads // 2, 2, seq_len, seq_len) # [batch, head/2, 2, time, time]
+                        teacher_attn = teacher_attn.mean(dim=2)  # [batch, head/2, time, time]
+
+                        # Compute MSE loss for this layer and accumulate
+                        layer_loss = F.mse_loss(student_attn, teacher_attn)
+                        attn_loss += layer_loss
+                
+                
+
             elif self.attn_loss_type == "1to1":
                 teacher_attns = []  # [batch, head, time, time] * layer
                 for x, tup in teacher_results['layer_results']:
