@@ -26,6 +26,7 @@ from pytorch_lightning.strategies import DDPStrategy
 
 import wandb
 from pytorch_lightning.loggers import WandbLogger
+from einops import rearrange
 
 
 class W2V2Distil(LightningModule):
@@ -58,6 +59,15 @@ class W2V2Distil(LightningModule):
         student_config = init_student_config(**self.distiller_cfg)
         student_config._teacher_task_agnostic = self.task_agnostic
 
+        # AAM Module (Pointwise Convolution)
+        self.aam = torch.nn.Conv2d(
+            in_channels=student_config.encoder_layers * student_config.encoder_attention_heads,
+            out_channels=teacher_config.encoder_layers * teacher_config.encoder_attention_heads,
+            kernel_size=1,
+            stride=1,
+            padding=0
+        )
+        
         self.time_tag = get_time_tag()
         dump_yaml(student_config, self.yaml_cfg, self.time_tag)
 
@@ -433,6 +443,48 @@ class W2V2Distil(LightningModule):
                         # Compute MSE loss for this layer and accumulate
                         layer_loss = F.mse_loss(student_attn, teacher_attn)
                         attn_loss += layer_loss
+
+            elif self.attn_loss_type == "a2d":
+                # Teacher Attention Maps
+                teacher_attns = []  # [batch, head, time, time] * layer
+                for x, tup in teacher_results['layer_results']:
+                    teacher_attns.append(tup[0])  # tup: (attn, lr)
+                
+                teacher_attns = torch.stack(teacher_attns, dim=0) # [layer, batch_size, num_head, L, L]
+                teacher_attns = teacher_attns.permute(1, 0, 2, 3, 4) # [batch_size, layer, num_head, L, L]
+                teacher_attns = teacher_attns.reshape(teacher_attns.size(0), -1, teacher_attns.size(3), teacher_attns.size(4)) # [batch_size, num_head * layer, L, L]
+                
+                # Student Attention Maps
+                student_attns = student_results['attn_layer_results']  # [batch, head/2, time, time] * layer
+                
+                student_attns = torch.stack(student_attns, dim=0) # [layer, batch_size, num_head, L, L]
+                student_attns = student_attns.permute(1, 0, 2, 3, 4) # [batch_size, layer, num_head, L, L]
+                student_attns = student_attns.reshape(student_attns.size(0), -1, student_attns.size(3), student_attns.size(4)) # [batch_size, num_head * layer, L, L]
+
+                # Intermediate Attention Maps
+                intermediate_attns = self.aam(student_attns)  # AAM Module (1x1 Conv)
+                
+                # Free memory
+                del student_attns
+                torch.cuda.empty_cache()
+                
+                # intermediate_attns와 teacher_attns 텐서를 재구성하여 KL-Divergence 계산
+                B, C, H, W = intermediate_attns.shape
+                B, C, H, W = teacher_attns.shape
+
+                # 텐서를 [B, C, H * W] 형태로 변환
+                intermediate_attns = intermediate_attns.view(B, C, H * W)
+                teacher_attns = teacher_attns.view(B, C, H * W)
+                
+                # Compute KL-Divergence between teacher and intermediate maps 
+                attn_loss =F.kl_div(
+                    F.log_softmax(intermediate_attns, dim=-1), 
+                    F.log_softmax(teacher_attns, dim=-1), 
+                    reduction='sum', 
+                    log_target=True
+                )
+                
+                
         else:
             attn_loss = 0
         
